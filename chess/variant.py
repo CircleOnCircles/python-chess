@@ -843,6 +843,16 @@ class CrazyhouseBoard(chess.Board):
 
         return status
 
+class Makruk(chess.Board):
+    pass
+    # WIP
+    # new starting board
+    # queen move
+    # no en passant
+    # no casttle
+    # new pawn move
+    # counting rules
+
 
 VARIANTS: List[Type[chess.Board]] = [
     chess.Board,
