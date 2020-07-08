@@ -23,6 +23,8 @@ import weakref
 import typing
 
 import chess
+import chess.engine
+import chess.svg
 
 from typing import Callable, Dict, Generic, Iterable, Iterator, List, Mapping, MutableMapping, Set, TextIO, Tuple, Type, TypeVar, Optional, Union
 
@@ -105,6 +107,24 @@ MOVETEXT_REGEX = re.compile(r"""
     """, re.DOTALL | re.VERBOSE)
 
 SKIP_MOVETEXT_REGEX = re.compile(r""";|\{|\}""")
+
+
+CLOCK_REGEX = re.compile(r"""\[%clk\s(\d+):(\d+):(\d+)\]""")
+
+EVAL_REGEX = re.compile(r"""
+    \[%eval\s(?:
+        \#([+-]?\d+)
+        |([+-]?(?:\d{0,10}\.\d{1,2}|\d{1,10}\.?))
+    )\]
+    """, re.VERBOSE)
+
+ARROWS_REGEX = re.compile(r"""
+    \[%(?:csl|cal)\s(
+        [RGYB][a-h][1-8](?:[a-h][1-8])?
+        (?:,[RGYB][a-h][1-8](?:[a-h][1-8])?)*
+    )\]
+    """, re.VERBOSE)
+
 
 TAG_ROSTER = ["Event", "Site", "Date", "Round", "White", "Black", "Result"]
 
@@ -365,6 +385,138 @@ class GameNode:
         node.nags.update(nags)
 
         return node
+
+    def eval(self) -> Optional[chess.engine.PovScore]:
+        """
+        Parses the first valid ``[%eval ...]`` annotation in the comment of
+        this node, if any.
+        """
+        match = EVAL_REGEX.search(self.comment)
+        if not match:
+            return None
+        if match.group(1):
+            mate = int(match.group(1))
+            return chess.engine.PovScore(chess.engine.Mate(mate), chess.WHITE) if mate else None
+        else:
+            return chess.engine.PovScore(chess.engine.Cp(int(float(match.group(2)) * 100)), chess.WHITE)
+
+    def set_eval(self, score: Optional[chess.engine.PovScore]) -> None:
+        """
+        Replaces the first valid ``[%eval ...]`` annotation in the comment of
+        this node or adds a new one.
+        """
+        eval = ""
+        if score is not None:
+            cp = score.white().score()
+            if cp is not None:
+                eval = f"[%eval {float(cp) / 100:.2f}]"
+            elif score.white().mate():
+                eval = f"[%eval #{score.white().mate()}]"
+
+        self.comment, found = EVAL_REGEX.subn(eval, self.comment, count=1)
+
+        if not found and eval:
+            if not self.comment.endswith(" "):
+                self.comment += " "
+            self.comment += eval
+
+    def arrows(self) -> List[chess.svg.Arrow]:
+        """
+        Parses all ``[%csl ...]`` and ``[%cal ...]`` annotations in the comment
+        of this node.
+
+        Returns a list of :class:`arrows <chess.svg.Arrow>`.
+        """
+        arrows = []
+        for match in ARROWS_REGEX.finditer(self.comment):
+            for group in match.group(1).split(","):
+                color = "G"
+                if group[0] == "R":
+                    color = "red"
+                elif group[0] == "Y":
+                    color = "yellow"
+                elif group[0] == "B":
+                    color = "blue"
+
+                tail = chess.SQUARE_NAMES.index(group[1:3])
+                if len(group) == 5:
+                    head = chess.SQUARE_NAMES.index(group[3:5])
+                else:
+                    head = tail
+
+                arrows.append(chess.svg.Arrow(tail, head, color=color))
+
+        return arrows
+
+    def set_arrows(self, arrows: Iterable[Union[chess.svg.Arrow, Tuple[chess.Square, chess.Square]]]) -> None:
+        """
+        Replaces all valid ``[%csl ...]`` and ``[%cal ...]`` annotations in
+        the comment of this node or adds new ones.
+        """
+        csl = []
+        cal = []
+
+        for arrow in arrows:
+            try:
+                tail, head, color = arrow.tail, arrow.head, arrow.color  # type: ignore
+                if color == "red":
+                    color = "R"
+                elif color == "yellow":
+                    color = "Y"
+                elif color == "blue":
+                    color = "B"
+                else:
+                    color = "G"
+            except AttributeError:
+                tail, head = arrow  # type: ignore
+                color = "G"
+            if tail == head:
+                csl.append(f"{color}{chess.SQUARE_NAMES[tail]}")
+            else:
+                cal.append(f"{color}{chess.SQUARE_NAMES[tail]}{chess.SQUARE_NAMES[head]}")
+
+        self.comment = ARROWS_REGEX.sub("", self.comment).strip()
+
+        prefix = ""
+        if csl:
+            prefix += f"[%csl {','.join(csl)}]"
+        if cal:
+            prefix += f"[%cal {','.join(cal)}]"
+
+        if prefix:
+            self.comment = prefix + " " + self.comment
+
+    def clock(self) -> Optional[float]:
+        """
+        Parses the first valid ``[%clk ...]`` annotation in the comment of
+        this node, if any.
+
+        Returns the player's remaining time to the next time control after this
+        move, in seconds.
+        """
+        match = CLOCK_REGEX.search(self.comment)
+        if match is None:
+            return None
+        return int(match.group(1)) * 3600 + int(match.group(2)) * 60 + int(match.group(3))
+
+    def set_clock(self, seconds: Optional[float]) -> None:
+        """
+        Replaces the first valid ``[%clk ...]`` annotation in the comment of
+        this node or adds a new one.
+        """
+        clk = ""
+        if seconds is not None:
+            hours = seconds // 3600
+            minutes = seconds % 3600 // 60
+            seconds = seconds % 3600 % 60
+            clk = f"[%clk {hours:d}:{minutes:02d}:{seconds:02d}]"
+
+        self.comment, found = CLOCK_REGEX.subn(clk, self.comment, count=1)
+
+        if not found and clk:
+            if not self.comment.endswith(" "):
+                self.comment += " "
+            self.comment += clk
 
     def _accept_node(self, parent_board: chess.Board, visitor: "BaseVisitor[ResultT]") -> None:
         assert self.move is not None, "cannot visit dangling GameNode"
