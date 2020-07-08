@@ -843,12 +843,62 @@ class CrazyhouseBoard(chess.Board):
 
         return status
 
-class Makruk(chess.Board):
-    pass
-    # WIP
-    # new starting board
+class MakrukBoard(chess.Board):
+    aliases = ["Makruk", "Thai chess"]
+    uci_variant = "makruk"
+    xboard_variant = "makruk"
+    starting_fen = "rnbqkbnr/8/pppppppp/8/8/PPPPPPPP/8/RNBKQBNR w KQkq - 0 1"
+
+    def __init__(self, fen: Optional[str] = starting_fen) -> None:
+        super().__init__(fen, chess960=False)
+    
+    def reset(self) -> None:
+        super().reset()
+        self.castling_rights = chess.BB_EMPTY
+
+    def is_variant_end(self) -> bool:
+        """
+        Checks if the game is over due to a special variant end condition.
+
+        Note, for example, that stalemate is not considered a variant-specific
+        end condition (this method will return ``False``), yet it can have a
+        special **result** in suicide chess (any of
+        :func:`~chess.Board.is_variant_loss()`,
+        :func:`~chess.Board.is_variant_win()`,
+        :func:`~chess.Board.is_variant_draw()` might return ``True``).
+        """
+        return False
+
+    def is_variant_loss(self) -> bool:
+        """
+        Checks if the current side to move lost due to a variant-specific
+        condition.
+        """
+        return False
+
+    def is_variant_win(self) -> bool:
+        """
+        Checks if the current side to move won due to a variant-specific
+        condition.
+        """
+        return False
+
+    def is_variant_draw(self) -> bool:
+        """
+        Checks if a variant-specific drawing condition is fulfilled.
+        """
+        return False
+
     # queen move
-    # no en passant
+
+    def has_pseudo_legal_en_passant(self) -> bool:
+        """Checks if there is a pseudo-legal en passant capture."""
+        return False
+
+    def has_legal_en_passant(self) -> bool:
+        """Checks if there is a legal en passant capture."""
+        return False
+
     # no casttle
     # new pawn move
     # counting rules
